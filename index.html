@@ -292,10 +292,20 @@ function buildNameSelect(){
   sel.appendChild(opt)
 }
 
+function parseDateSafe(dateStr){
+  if(!dateStr)return null
+  const d=new Date(dateStr)
+  if(isNaN(d.getTime()))return null
+  return d
+}
+
 function formatDateYMD(dateStr){
-  if(!dateStr)return ''
-  const m=String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/)
-  return m?`${m[1]}-${m[2]}-${m[3]}`:dateStr
+  const d=parseDateSafe(dateStr)
+  if(!d)return dateStr||''
+  const y=d.getFullYear()
+  const m=String(d.getMonth()+1).padStart(2,'0')
+  const day=String(d.getDate()).padStart(2,'0')
+  return `${y}-${m}-${day}`
 }
 
 function fmt(n){return Number(n||0).toLocaleString()}
@@ -671,8 +681,9 @@ function renderCustomList(){
 function getMonthlySummary(){
   const map={}
   data.forEach(t=>{
-    if(!t.date)return
-    const key=t.date.slice(0,7) // YYYY-MM
+    const d=parseDateSafe(t.date)
+    if(!d)return
+    const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
     if(!map[key])map[key]={month:key,count:0,amount:0}
     map[key].count+=1
     map[key].amount+=Number(t.dailyAmount)*Number(t.quantity)
@@ -694,10 +705,10 @@ function renderMonthlySummary(){
 
   const rows=list.map(m=>{
     const [y,mo]=m.month.split('-')
-    const yy=y.slice(2)
+    const yy=String(y).slice(-2)
     const pct=totalAmount>0?(m.amount/totalAmount*100):0
     return `<tr>
-      <td><strong>${yy}.${mo}</strong></td>
+      <td><strong>${yy}년${Number(mo)}월</strong></td>
       <td class="text-right">${m.count}건</td>
       <td class="text-right"><strong>${fmt(fmtNum(m.amount))}원</strong></td>
       <td style="min-width:180px">
