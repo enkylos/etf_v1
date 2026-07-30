@@ -117,6 +117,12 @@ body{padding:12px}
     <div class="dashboard-grid" id="tickerDashboard"></div>
   </div>
 
+  <!-- 월별 매수합계금액 -->
+  <div class="card">
+    <h2>월별 매수합계금액 <span style="font-size:12px;font-weight:normal;color:#a0aec0;margin-left:8px">(지난 매수 + 앞으로 예정된 매수 포함, 날짜 기준)</span></h2>
+    <div id="monthlySummaryContainer"></div>
+  </div>
+
   <!-- 매수 등록 -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -656,7 +662,78 @@ function renderCustomList(){
   })
 }
 
-function renderAll(){renderSummary();renderTickerDashboard();renderTransactions()}
+function getMonthlySummary(){
+  const map={}
+  data.forEach(t=>{
+    if(!t.date)return
+    const key=t.date.slice(0,7) // YYYY-MM
+    if(!map[key])map[key]={month:key,count:0,amount:0}
+    map[key].count+=1
+    map[key].amount+=Number(t.dailyAmount)*Number(t.quantity)
+  })
+  return Object.values(map).sort((a,b)=>a.month.localeCompare(b.month))
+}
+
+function renderMonthlySummary(){
+  const container=document.getElementById('monthlySummaryContainer')
+  const list=getMonthlySummary()
+
+  if(list.length===0){
+    container.innerHTML='<div class="empty-msg">등록된 매수 내역이 없습니다.</div>'
+    return
+  }
+
+  const thisMonth=new Date().toISOString().slice(0,7)
+  const maxAmount=Math.max(...list.map(m=>m.amount),1)
+  const totalCount=list.reduce((s,m)=>s+m.count,0)
+  const totalAmount=list.reduce((s,m)=>s+m.amount,0)
+
+  const rows=list.map(m=>{
+    const isFuture=m.month>thisMonth
+    const isCurrent=m.month===thisMonth
+    const statusLabel=isFuture?'예정':(isCurrent?'진행중':'완료')
+    const statusColor=isFuture?'#718096':(isCurrent?'#DD6B20':'#38A169')
+    const barWidth=(m.amount/maxAmount*100).toFixed(1)
+    const barFill=isFuture
+      ?'repeating-linear-gradient(45deg,#CBD5E0,#CBD5E0 4px,#E2E8F0 4px,#E2E8F0 8px)'
+      :'linear-gradient(135deg,#667eea,#764ba2)'
+    const [y,mo]=m.month.split('-')
+    return `<tr>
+      <td><strong>${y}년 ${Number(mo)}월</strong></td>
+      <td class="text-right">${m.count}건</td>
+      <td class="text-right"><strong>${fmt(fmtNum(m.amount))}원</strong></td>
+      <td class="text-center"><span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:${statusColor}">${statusLabel}</span></td>
+      <td style="min-width:120px"><div style="background:#EDF2F7;border-radius:6px;height:10px;overflow:hidden"><div style="width:${barWidth}%;height:100%;background:${barFill}"></div></div></td>
+    </tr>`
+  }).join('')
+
+  container.innerHTML=`
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>년월</th>
+            <th class="text-right">매수 건수</th>
+            <th class="text-right">매수합계금액</th>
+            <th class="text-center">상태</th>
+            <th>비중</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="background:#F7FAFC;border-top:2px solid #E2E8F0">
+            <td><strong>합계</strong></td>
+            <td class="text-right"><strong>${totalCount}건</strong></td>
+            <td class="text-right"><strong>${fmt(fmtNum(totalAmount))}원</strong></td>
+            <td></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`
+}
+
+function renderAll(){renderSummary();renderTickerDashboard();renderMonthlySummary();renderTransactions()}
 
 document.getElementById('buyForm').addEventListener('submit',addTransaction)
 document.getElementById('inputName').addEventListener('change',onNameChange)
