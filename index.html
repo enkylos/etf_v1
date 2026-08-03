@@ -218,6 +218,7 @@ let data=[]
 let nextId=0
 let customEtfs=[]
 let cardOrder=[]
+let tickerPrices={} // {ticker:{price,change}} - 매수내역과 완전히 분리된 종목별 현재가 저장소
 
 // [데이터 불러오기] Google Apps Script(구글 시트 DB)에서 데이터 동기화
 async function loadData(){
@@ -229,6 +230,7 @@ async function loadData(){
       nextId = parsed.nextId || 0
       customEtfs = parsed.customEtfs || []
       cardOrder = parsed.cardOrder || []
+      tickerPrices = parsed.tickerPrices || {}
     }
   }catch(e){
     console.error("데이터 로드 실패, 로컬 데이터 사용:", e)
@@ -237,6 +239,7 @@ async function loadData(){
     nextId = Number(localStorage.getItem('etf_nextId')) || 0
     customEtfs = JSON.parse(localStorage.getItem('etf_customs')) || []
     cardOrder = JSON.parse(localStorage.getItem('etf_cardOrder')) || []
+    tickerPrices = JSON.parse(localStorage.getItem('etf_tickerPrices')) || {}
   }
 
   buildNameSelect()
@@ -249,8 +252,9 @@ async function saveDataAll(){
   localStorage.setItem('etf_nextId', nextId)
   localStorage.setItem('etf_customs', JSON.stringify(customEtfs))
   localStorage.setItem('etf_cardOrder', JSON.stringify(cardOrder))
+  localStorage.setItem('etf_tickerPrices', JSON.stringify(tickerPrices))
 
-  const payload = { transactions: data, nextId: nextId, customEtfs: customEtfs, cardOrder: cardOrder }
+  const payload = { transactions: data, nextId: nextId, customEtfs: customEtfs, cardOrder: cardOrder, tickerPrices: tickerPrices }
   try{
     await fetch(GAS_URL, {
       method: 'POST',
@@ -394,7 +398,7 @@ async function refreshAllPrices() {
 }
 
 function updateTickerPrices(ticker,price,change){
-  data.forEach(t=>{if(t.ticker===ticker){t.currentPrice=price;t.change=change}})
+  tickerPrices[ticker]={price:Number(price)||0,change:Number(change)||0}
   saveData()
   renderAll()
 }
@@ -402,18 +406,17 @@ function updateTickerPrices(ticker,price,change){
 function getTickerSummary(){
   const map={}
   data.forEach(t=>{
-    if(!map[t.ticker])map[t.ticker]={name:t.name,ticker:t.ticker,qty:0,amount:0,price:0,change:0,_latestId:-Infinity}
+    if(!map[t.ticker])map[t.ticker]={name:t.name,ticker:t.ticker,qty:0,amount:0}
     map[t.ticker].qty+=Number(t.quantity)
     map[t.ticker].amount+=(Number(t.dailyAmount)*Number(t.quantity))
-    // 현재가는 배열 순서와 상관없이, id가 가장 큰(가장 최근에 등록/갱신된) 매수 건 기준으로 채택
-    if(t.currentPrice>0 && Number(t.id)>=map[t.ticker]._latestId){
-      map[t.ticker].price=t.currentPrice
-      map[t.ticker].change=t.change||0
-      map[t.ticker]._latestId=Number(t.id)
-    }
   })
-  
-  let list = Object.values(map).map(({_latestId, ...rest})=>rest)
+
+  // 현재가/등락은 매수내역과 무관하게 오직 tickerPrices(종목별 현황에서만 설정)에서 가져옴
+  let list = Object.values(map).map(tk=>({
+    ...tk,
+    price:(tickerPrices[tk.ticker]&&tickerPrices[tk.ticker].price)||0,
+    change:(tickerPrices[tk.ticker]&&tickerPrices[tk.ticker].change)||0
+  }))
   
   if(cardOrder.length > 0) {
     list.sort((a, b) => {
@@ -561,18 +564,14 @@ function renderTransactions(){
       <td class="text-right">${fmt(Number(t.dailyAmount))}원</td>
       <td class="text-right">${t.quantity}주</td>
       <td class="text-right">${fmt(fmtNum(totalBuy))}원</td>
-      <td class="text-right">${fmt(fmtNum(t.currentPrice||0))}원</td>
-      <td class="text-right price-input"><input type="text" value="${fmt(t.change||'')}" data-id="${t.id}" class="change-update"></td>
+      <td class="text-right">${fmt(fmtNum((tickerPrices[t.ticker]&&tickerPrices[t.ticker].price)||0))}원</td>
+      <td class="text-right">${fmt(fmtNum((tickerPrices[t.ticker]&&tickerPrices[t.ticker].change)||0))}원</td>
       <td class="text-center"><button class="btn btn-danger" data-id="${t.id}">삭제</button></td>
     </tr>`
   }).join('')
 
   tbody.querySelectorAll('.ticker-update').forEach(inp=>{
     inp.addEventListener('change',function(){updateTickerCode(this.dataset.id,this.value.trim())})
-  })
-  tbody.querySelectorAll('.change-update').forEach(inp=>{
-    inp.addEventListener('input',inputFormatComma)
-    inp.addEventListener('change',function(){updatePrice(this.dataset.id,'change',unformat(this.value))})
   })
   tbody.querySelectorAll('.btn-danger').forEach(btn=>{
     btn.addEventListener('click',function(){deleteTransaction(this.dataset.id)})
@@ -583,14 +582,6 @@ function updateTickerCode(id, newTicker){
   const tx=data.find(t=>t.id==id)
   if(!tx||!newTicker)return
   tx.ticker=newTicker
-  saveData()
-  renderAll()
-}
-
-function updatePrice(id,field,val){
-  const tx=data.find(t=>t.id==id)
-  if(!tx)return
-  data.forEach(t=>{if(t.ticker===tx.ticker)t[field]=val})
   saveData()
   renderAll()
 }
@@ -637,7 +628,7 @@ function addTransaction(ev){
   }
 
   const id=++nextId
-  data.push({id,date,name,ticker,dailyAmount,quantity,currentPrice:0,change:0})
+  data.push({id,date,name,ticker,dailyAmount,quantity})
 
   saveData()
   document.getElementById('buyForm').reset()
