@@ -158,17 +158,9 @@ body{padding:12px}
         <input type="text" id="inputSubtotal" readonly style="background:#F7FAFC;color:#3182CE;font-weight:600">
       </div>
       <div class="form-group">
-        <label>현재가 (원)</label>
-        <div class="input-with-btn">
-          <input type="text" id="inputPrice" placeholder="0" inputmode="numeric">
-          <button type="button" class="btn btn-secondary" id="btnFetchPrice">조회</button>
-        </div>
-      </div>
-      <div class="form-group">
         <button type="submit" class="btn btn-primary" style="width:100%">매수 내역 등록</button>
       </div>
     </form>
-    <div id="fetchStatus" style="font-size:12px;color:#718096;margin-top:8px;min-height:18px"></div>
   </div>
 
   <!-- 모달 창 -->
@@ -226,7 +218,6 @@ let data=[]
 let nextId=0
 let customEtfs=[]
 let cardOrder=[]
-let fetchingPrice=false
 
 // [데이터 불러오기] Google Apps Script(구글 시트 DB)에서 데이터 동기화
 async function loadData(){
@@ -374,42 +365,6 @@ function updateSubtotal(){
   document.getElementById('inputSubtotal').value=subtotal>0?fmt(fmtNum(subtotal)):''
 }
 
-async function fetchPrice(){
-  const ticker=document.getElementById('inputTicker').value.trim()
-  const btn=document.getElementById('btnFetchPrice')
-  const statusEl=document.getElementById('fetchStatus')
-
-  if(!ticker||fetchingPrice)return
-
-  fetchingPrice=true
-  btn.disabled=true
-  btn.textContent='조회중...'
-  statusEl.style.color='#718096'
-  statusEl.textContent='구글 API를 통해 최신 시세를 조회 중입니다...'
-
-  try {
-    const res = await fetch(`${GAS_URL}?ticker=${ticker}`)
-    if(res.ok) {
-      const json = await res.json()
-      if(json && json.price) {
-        document.getElementById('inputPrice').value = fmt(json.price)
-        updateTickerPrices(ticker, json.price, json.change)
-        statusEl.style.color = '#2B6CB0'
-        statusEl.textContent = `시세 실시간 업데이트 성공! (현재가: ${fmt(json.price)}원)`
-      } else {
-        throw new Error("No price")
-      }
-    }
-  } catch(e) {
-    statusEl.style.color = '#E53E3E'
-    statusEl.textContent = '시세를 불러오는 데 실패했습니다. 종목코드 및 GAS URL을 확인해 주세요.'
-  }
-
-  fetchingPrice=false
-  btn.disabled=false
-  btn.textContent='조회'
-}
-
 async function refreshAllPrices() {
   const tickers = [...new Set(data.map(t => t.ticker))]
   if(tickers.length === 0) {
@@ -527,7 +482,7 @@ function renderTickerDashboard(){
       </div>
       <div class="ticker-stats">
         <div class="ticker-stat"><span class="stat-label">평단가</span><span class="stat-value">${fmt(fmtNum(avgBuy))}원</span></div>
-        <div class="ticker-stat"><span class="stat-label">현재가</span><span class="stat-value">${fmt(fmtNum(tk.price))}원</span></div>
+        <div class="ticker-stat"><span class="stat-label">현재가</span><span class="stat-value"><input type="text" class="ticker-price-input" data-ticker="${tk.ticker}" draggable="false" value="${fmt(fmtNum(tk.price))}" style="width:100px;text-align:right;border:1px solid #E2E8F0;border-radius:6px;padding:3px 8px;font:inherit;font-weight:700;color:inherit">원</span></div>
         <div class="ticker-stat" style="grid-column:1/-1"><span class="stat-label">총 매수금액</span><span class="stat-value">${fmt(fmtNum(tk.amount))}원</span></div>
         <div class="ticker-stat"><span class="stat-label">수익률</span><span class="stat-value ${rate>=0?'positive':'negative'}">${rate>=0?'+':''}${rate.toFixed(2)}%</span></div>
         <div class="ticker-stat"><span class="stat-label">수익금</span><span class="stat-value ${profit>=0?'positive':'negative'}">${profit>=0?'+':''}${fmt(fmtNum(profit))}원</span></div>
@@ -535,6 +490,21 @@ function renderTickerDashboard(){
       </div>
     </div>`
   }).join('')
+
+  const changeMap={}
+  c.tickers.forEach(tk=>{changeMap[tk.ticker]=tk.change||0})
+  container.querySelectorAll('.ticker-price-input').forEach(inp=>{
+    inp.addEventListener('mousedown',e=>e.stopPropagation())
+    inp.addEventListener('click',e=>e.stopPropagation())
+    inp.addEventListener('change',function(){
+      const newPrice=unformat(this.value)
+      if(newPrice>0){
+        updateTickerPrices(this.dataset.ticker,newPrice,changeMap[this.dataset.ticker]||0)
+      }else{
+        renderAll()
+      }
+    })
+  })
 
   initDragAndDrop()
 }
@@ -591,7 +561,7 @@ function renderTransactions(){
       <td class="text-right">${fmt(Number(t.dailyAmount))}원</td>
       <td class="text-right">${t.quantity}주</td>
       <td class="text-right">${fmt(fmtNum(totalBuy))}원</td>
-      <td class="text-right price-input"><input type="text" value="${fmt(t.currentPrice||'')}" data-id="${t.id}" class="price-update"></td>
+      <td class="text-right">${fmt(fmtNum(t.currentPrice||0))}원</td>
       <td class="text-right price-input"><input type="text" value="${fmt(t.change||'')}" data-id="${t.id}" class="change-update"></td>
       <td class="text-center"><button class="btn btn-danger" data-id="${t.id}">삭제</button></td>
     </tr>`
@@ -599,10 +569,6 @@ function renderTransactions(){
 
   tbody.querySelectorAll('.ticker-update').forEach(inp=>{
     inp.addEventListener('change',function(){updateTickerCode(this.dataset.id,this.value.trim())})
-  })
-  tbody.querySelectorAll('.price-update').forEach(inp=>{
-    inp.addEventListener('input',inputFormatComma)
-    inp.addEventListener('change',function(){updatePrice(this.dataset.id,'currentPrice',unformat(this.value))})
   })
   tbody.querySelectorAll('.change-update').forEach(inp=>{
     inp.addEventListener('input',inputFormatComma)
@@ -664,7 +630,6 @@ function addTransaction(ev){
   const ticker=document.getElementById('inputTicker').value.trim()
   const dailyAmount=unformat(document.getElementById('inputAmount').value)
   const quantity=parseFloat(document.getElementById('inputQty').value)||0
-  const currentPrice=unformat(document.getElementById('inputPrice').value)
 
   if(!date||!name||!ticker||dailyAmount<=0||quantity<=0){
     alert('모든 필수 항목을 입력해주세요.')
@@ -672,8 +637,7 @@ function addTransaction(ev){
   }
 
   const id=++nextId
-  data.push({id,date,name,ticker,dailyAmount,quantity,currentPrice,change:0})
-  if(currentPrice>0)data.forEach(t=>{if(t.ticker===ticker)t.currentPrice=currentPrice})
+  data.push({id,date,name,ticker,dailyAmount,quantity,currentPrice:0,change:0})
 
   saveData()
   document.getElementById('buyForm').reset()
@@ -784,10 +748,8 @@ function renderAll(){renderSummary();renderTickerDashboard();renderMonthlySummar
 
 document.getElementById('buyForm').addEventListener('submit',addTransaction)
 document.getElementById('inputName').addEventListener('change',onNameChange)
-document.getElementById('btnFetchPrice').addEventListener('click',fetchPrice)
 document.getElementById('btnRefreshAll').addEventListener('click',refreshAllPrices)
 document.getElementById('inputAmount').addEventListener('input',function(e){inputFormatComma(e);updateSubtotal()})
-document.getElementById('inputPrice').addEventListener('input',inputFormatComma)
 document.getElementById('inputQty').addEventListener('input',updateSubtotal)
 document.getElementById('btnManageEtfs').addEventListener('click',function(){
   document.getElementById('modalOverlay').style.display='flex'
