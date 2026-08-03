@@ -189,8 +189,6 @@ body{padding:12px}
             <th class="text-right">매수 단가</th>
             <th class="text-right">수량</th>
             <th class="text-right">매수 총액</th>
-            <th class="text-right">현재가</th>
-            <th class="text-right">전일대비 등락</th>
             <th class="text-center">관리</th>
           </tr>
         </thead>
@@ -246,10 +244,19 @@ async function loadData(){
   renderAll()
 
   // 페이지를 열 때마다 자동으로 모든 종목의 네이버 시세를 불러옴 (수동 조작 불필요)
-  refreshAllPrices(true)
+  // 반드시 완료를 기다린 뒤 정리 저장을 해야 순서가 꼬이지 않음
+  try{
+    await refreshAllPrices(true)
+  }catch(e){
+    console.error("자동 시세 갱신 중 오류:", e)
+  }
 
   // 매수내역에 남아있던 예전 현재가 값을 시트에서도 정리(0으로 저장)
-  saveData()
+  try{
+    await saveData()
+  }catch(e){
+    console.error("정리 저장 중 오류:", e)
+  }
 }
 
 // [데이터 저장] Google Apps Script로 동기화 및 백업용 LocalStorage 저장
@@ -395,9 +402,16 @@ async function refreshAllPrices(silent) {
         const json = await res.json()
         if(json && json.price) {
           updateTickerPrices(ticker, json.price, json.change)
+        } else {
+          console.warn(`[시세 갱신 실패] ${ticker}: 응답에 가격 정보 없음`, json)
         }
+      } else {
+        console.warn(`[시세 갱신 실패] ${ticker}: HTTP ${res.status}`)
       }
-    } catch(e) {}
+    } catch(e) {
+      console.warn(`[시세 갱신 실패] ${ticker}:`, e)
+    }
+    await new Promise(r=>setTimeout(r,150)) // 연속 요청 사이 짧은 지연 (네이버 측 레이트리밋 완화)
   }
 
   btn.disabled = false
@@ -572,8 +586,6 @@ function renderTransactions(){
       <td class="text-right">${fmt(Number(t.dailyAmount))}원</td>
       <td class="text-right">${t.quantity}주</td>
       <td class="text-right">${fmt(fmtNum(totalBuy))}원</td>
-      <td class="text-right">${fmt(fmtNum((tickerPrices[t.ticker]&&tickerPrices[t.ticker].price)||0))}원</td>
-      <td class="text-right">${fmt(fmtNum((tickerPrices[t.ticker]&&tickerPrices[t.ticker].change)||0))}원</td>
       <td class="text-center"><button class="btn btn-danger" data-id="${t.id}">삭제</button></td>
     </tr>`
   }).join('')
