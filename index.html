@@ -300,25 +300,31 @@ function parseDateSafe(raw){
 
   const str=String(raw).trim()
 
+  // 1) "YYYY-MM-DD" 또는 "YYYY-MM-DDTHH:mm:ss..." (ISO) 형식 - 문자열 맨 앞에서 직접 추출
   let m=str.match(/^(\d{4})-(\d{2})-(\d{2})/)
   if(m)return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]))
 
+  // 2) "YYYY/MM/DD" 형식
   m=str.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/)
   if(m)return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]))
 
+  // 3) "Tue Jul 28 2026 00:00:00 GMT+0900 (...)" 처럼 영문 요일/월 이름이 포함된 형식
+  //    - 어디에 위치하든 "월이름 일 연도" 패턴만 뽑아냄 (타임존 표기는 무시)
   m=str.match(/([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(\d{4})/)
   if(m){
     const mon=MONTH_NAMES[m[1].toLowerCase()]
     if(mon!==undefined)return new Date(Number(m[3]),mon,Number(m[2]))
   }
 
+  // 4) 순수 숫자만 있는 경우 - 구글시트 날짜 일련번호(1899-12-30 기준 경과일수)로 간주
   if(/^\d+(\.\d+)?$/.test(str)){
     const num=Number(str)
-    if(num>20000&&num<80000){
+    if(num>20000&&num<80000){ // 대략 1954~2119년 사이의 합리적 범위만 인정
       return new Date((num-25569)*86400*1000)
     }
   }
 
+  // 5) 그 외에는 브라우저 기본 파서로 최후 시도
   const d=new Date(str)
   return isNaN(d.getTime())?null:d
 }
@@ -441,14 +447,18 @@ function updateTickerPrices(ticker,price,change){
 function getTickerSummary(){
   const map={}
   data.forEach(t=>{
-    if(!map[t.ticker])map[t.ticker]={name:t.name,ticker:t.ticker,qty:0,amount:0,price:t.currentPrice||0,change:t.change||0}
+    if(!map[t.ticker])map[t.ticker]={name:t.name,ticker:t.ticker,qty:0,amount:0,price:0,change:0,_latestId:-Infinity}
     map[t.ticker].qty+=Number(t.quantity)
     map[t.ticker].amount+=(Number(t.dailyAmount)*Number(t.quantity))
-    if(t.currentPrice>0)map[t.ticker].price=t.currentPrice
-    if(t.change!==undefined)map[t.ticker].change=t.change
+    // 현재가는 배열 순서와 상관없이, id가 가장 큰(가장 최근에 등록/갱신된) 매수 건 기준으로 채택
+    if(t.currentPrice>0 && Number(t.id)>=map[t.ticker]._latestId){
+      map[t.ticker].price=t.currentPrice
+      map[t.ticker].change=t.change||0
+      map[t.ticker]._latestId=Number(t.id)
+    }
   })
   
-  let list = Object.values(map)
+  let list = Object.values(map).map(({_latestId, ...rest})=>rest)
   
   if(cardOrder.length > 0) {
     list.sort((a, b) => {
