@@ -244,6 +244,12 @@ async function loadData(){
 
   buildNameSelect()
   renderAll()
+
+  // 페이지를 열 때마다 자동으로 모든 종목의 네이버 시세를 불러옴 (수동 조작 불필요)
+  refreshAllPrices(true)
+
+  // 매수내역에 남아있던 예전 현재가 값을 시트에서도 정리(0으로 저장)
+  saveData()
 }
 
 // [데이터 저장] Google Apps Script로 동기화 및 백업용 LocalStorage 저장
@@ -254,7 +260,9 @@ async function saveDataAll(){
   localStorage.setItem('etf_cardOrder', JSON.stringify(cardOrder))
   localStorage.setItem('etf_tickerPrices', JSON.stringify(tickerPrices))
 
-  const payload = { transactions: data, nextId: nextId, customEtfs: customEtfs, cardOrder: cardOrder, tickerPrices: tickerPrices }
+  // 매수내역에는 더이상 현재가를 저장하지 않음(시트에도 0으로 기록되어 예전 값이 점차 사라짐)
+  const cleanTransactions = data.map(t=>({id:t.id,date:t.date,name:t.name,ticker:t.ticker,dailyAmount:t.dailyAmount,quantity:t.quantity}))
+  const payload = { transactions: cleanTransactions, nextId: nextId, customEtfs: customEtfs, cardOrder: cardOrder, tickerPrices: tickerPrices }
   try{
     await fetch(GAS_URL, {
       method: 'POST',
@@ -369,10 +377,10 @@ function updateSubtotal(){
   document.getElementById('inputSubtotal').value=subtotal>0?fmt(fmtNum(subtotal)):''
 }
 
-async function refreshAllPrices() {
+async function refreshAllPrices(silent) {
   const tickers = [...new Set(data.map(t => t.ticker))]
   if(tickers.length === 0) {
-    alert("등록된 종목이 없습니다.")
+    if(!silent) alert("등록된 종목이 없습니다.")
     return
   }
 
@@ -394,7 +402,7 @@ async function refreshAllPrices() {
 
   btn.disabled = false
   btn.textContent = '전체 종목 시세 새로고침'
-  alert("모든 종목의 최신 시세가 반영되었습니다!")
+  if(!silent) alert("모든 종목의 최신 시세가 반영되었습니다!")
 }
 
 function updateTickerPrices(ticker,price,change){
